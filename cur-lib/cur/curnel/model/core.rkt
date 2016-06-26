@@ -27,7 +27,8 @@
   (i j k  ::= natural)
   (U ::= (Unv i))
   (D x c ::= variable-not-otherwise-mentioned)
-  (Δ   ::= ∅ (Δ (D : t ((c : t) ...))))
+  (Γc  ::= · (Γc (c : t)))
+  (Δ   ::= · (Δ (D : n t Γc)))
   ;; TODO: Might make more sense for methods to come first
   ;; (elim inductive-type motive (indices ...) (methods ...) discriminant)
   (t e ::= U (λ (x : e) e) x (Π (x : e) e) (e e) (elim D e (e ...) e))
@@ -66,29 +67,22 @@
 
 (define-metafunction ttL
   Δ-in-dom : Δ D -> #t or #f
-  [(Δ-in-dom ∅ D)
-   #f]
-  [(Δ-in-dom (Δ (D : t any)) D)
-   #t]
-  [(Δ-in-dom (Δ (D_!_0 : any_D any)) (name D D_!_0))
-   (Δ-in-dom Δ D)])
+  [(Δ-in-dom Δ D) (snoc-env-in-dom Δ D)])
 
 (define-metafunction ttL
   Δ-in-constructor-dom : Δ c -> #t or #f
-  [(Δ-in-constructor-dom ∅ c)
-   #f]
-  [(Δ-in-constructor-dom (Δ (D : any_D ((c_!_0 : any) ... (c_i : any_i) any_r ...))) (name c_i c_!_0))
-   #t]
-  [(Δ-in-constructor-dom (Δ (D : any_D ((c_!_0 : any) ...))) (name c c_!_0))
-   (Δ-in-constructor-dom Δ c)])
+  [(Δ-in-constructor-dom Δ c)
+   ,(for/fold ([r #f])
+              ([e (term (snoc-env->als Δ))])
+      #:break r
+      (term (snoc-env-in-dom (term (last e)) c)))])
 
 (define-metafunction ttL
   Δ-ref-type : Δ_0 D_0 -> t
   #:pre (Δ-in-dom Δ_0 D_0)
-  [(Δ-ref-type (Δ (D : t any)) D)
-   t]
-  [(Δ-ref-type (Δ (D_!_0 : t any)) (name D D_!_0))
-   (Δ-ref-type Δ D)])
+  [(Δ-ref-type Δ D)
+   t
+   (where (D : _ t _ ...) (snoc-env-ref Δ D))])
 
 ;; Make D : t ∈ Δ a little easier to use, prettier to render
 (define-judgment-form ttL
@@ -104,19 +98,20 @@
 (define-metafunction ttL
   Δ-key-by-constructor : Δ_0 c_0 -> D
   #:pre (Δ-in-constructor-dom Δ_0 c_0)
-  [(Δ-key-by-constructor (Δ (D : any_D ((c_!_0 : any_c) ... (c : any_ci) any_r ...))) (name c c_!_0))
-   D]
-  [(Δ-key-by-constructor (Δ (D : any_D ((c_!_0 : any_c) ...))) (name c c_!_0))
+  [(Δ-key-by-constructor (Δ (D : _ ... Γc)) c)
+   D
+   (side-condition (snoc-env-in-dom Γc c))]
+  [(Δ-key-by-constructor (Δ _) c)
    (Δ-key-by-constructor Δ c)])
 
 ;; Returns the constructor map for the inductively defined type D in the signature Δ
 (define-metafunction ttL
   Δ-ref-constructor-map : Δ_0 D_0 -> ((c : t) ...)
   #:pre (Δ-in-dom Δ_0 D_0)
-  [(Δ-ref-constructor-map (Δ (D : any_D any)) D)
-   any]
-  [(Δ-ref-constructor-map (Δ (D_!_0 : any_D any)) (name D D_!_0))
-   (Δ-ref-constructor-map Δ D)])
+  [(Δ-ref-constructor-map Δ D)
+   ;; NB: Need to return in reverse-dependency order, while ->als returns in dependency order
+   ,(reverse (snoc-env->als Γc))
+   (where (D : _ _ Γc) (snoc-env-ref Δ D))])
 
 ;; Return the type of the constructor c_i
 (define-metafunction ttL
@@ -125,8 +120,8 @@
   [(Δ-ref-constructor-type Δ c)
    t
    (where D (Δ-key-by-constructor Δ c))
-   (where (any_1 ... (c : t) any_0 ...)
-          (Δ-ref-constructor-map Δ D))])
+   (where (D : _ _ Γc) (snoc-env-ref Δ D))
+   (where (_ _ t) (snoc-env-ref Γc c))])
 
 ;; Make c : t ∈ Δ a little easier to use, prettier to render
 (define-judgment-form ttL
@@ -143,7 +138,29 @@
   #:pre (Δ-in-dom Δ_0 D_0)
   [(Δ-ref-constructors Δ D)
    (c ...)
-   (where ((c : any) ...) (Δ-ref-constructor-map Δ D))])
+   (where ((c _ _) ...) (Δ-ref-constructor-map Δ D))])
+
+(define-metafunction ttL
+  Δ-ref-parameter-count : Δ_0 D_0 -> n
+  #:pre (Δ-in-dom Δ_0 D_0)
+  [(Δ-ref-parameter-count Δ D)
+   n
+   (where (D : n _ _) (snoc-env-ref Δ D))])
+
+(define-metafunction ttL
+  Δ-constructor-ref-parameter-count : Δ_0 c_0 -> n
+  #:pre (Δ-in-constructor-dom Δ_0 c_0)
+  [(Δ-constructor-ref-parameter-count Δ c)
+   n
+   (where (D : n _ _) (Δ-ref-by-constructor Δ c))])
+
+(define-metafunction tt
+  Δ-constructor-ref-non-parameter-count : Δ_0 c_0 -> n
+  #:pre (Δ-in-constructor-dom Δ_0 c_0)
+  [(Δ-constructor-ref-non-parameter-count Δ c)
+   ,(- (term (Ξ-length Ξ)) (term n))
+   (where n (Δ-constructor-ref-parameter-count Δ c))
+   (judgment-holds (Δ-constr-in Δ c (in-hole Ξ (in-hole Θ D))))])
 
 ;;; ------------------------------------------------------------------------
 ;;; Operations that involve contexts.
@@ -167,21 +184,55 @@
   [(list->Θ (e e_r ...))
    (in-hole (list->Θ (e_r ...)) (hole e))])
 
+(define-metafunction ttL
+  Θ-length : Θ -> n
+  [(Θ-length Θ)
+   ,(length (term (Θ-flatten Θ)))])
+
+(define-metafunction ttL
+  Θ-drop : Θ_0 n_0 -> Θ
+  #:pre ,(<= (term n_0) (term (Θ-length Θ_0)))
+  [(Θ-drop Θ 0)
+   Θ]
+  [(Θ-drop (in-hole Θ (hole e)) n)
+   (Θ-drop Θ ,(sub1 (term n)))])
+
 (define-metafunction tt-ctxtL
   apply : e e ... -> e
   [(apply e_f e ...)
    (in-hole (list->Θ (e ...)) e_f)])
 
+;; Instantiate a Π type
+(define-metafunction cicL
+  instantiate : t Θ -> t
+  [(instantiate t hole)
+   t]
+  [(instantiate (Π (x : t) t_1) (in-hole Θ (hole e)))
+   (instantiate (substitute t_1 x e) Θ)])
+
 ;;; ------------------------------------------------------------------------
 ;;; Computing the types of eliminators
 
+;; All ref-index metafunctions need a Θ of parameters because hygiene and dependency
 ;; Return the indices of D as a telescope Ξ
 (define-metafunction tt-ctxtL
-  Δ-ref-index-Ξ : Δ_0 D_0 -> Ξ
-  #:pre (Δ-in-dom Δ_0 D_0)
-  [(Δ-ref-index-Ξ any_Δ any_D)
+  Δ-ref-index-Ξ : Δ_0 D_0 Θ_0 -> Ξ
+  #:pre ,(and (term (Δ-in-dom Δ_0 D_0))
+              (equal? (term (Θ-length))
+                      (term (Δ-ref-parameter-count Δ_0 D_0))))
+  [(Δ-ref-index-Ξ Δ D Θ)
    Ξ
-   (where (in-hole Ξ U) (Δ-ref-type any_Δ any_D))])
+   (where (D : _ t _) (snoc-env-ref Δ D))
+   (where (in-hole Ξ U) (instantiate t Θ))]) 
+
+(define-metafunction ttL
+  Δ-constructor-ref-index-Ξ : Δ_0 c_0 Θ_0 -> Ξ
+  #:pre ,(and (term (Δ-in-constructor-dom Δ_0 c_0))
+              (= (term (Θ-length Θ_0)) (term (Δ-constructor-ref-parameter-count Δ_0 c_0))))
+  [(Δ-constructor-ref-index-Ξ Δ c Θ)
+   Ξ
+   (where t (Δ-ref-constructor-type Δ c))
+   (where (in-hole Ξ (in-hole Θ_0 D)) (instantiate t Θ))])
 
 ;; Returns the telescope of the arguments for the constructor c_i of the inductively defined type D
 (define-metafunction tt-ctxtL
@@ -199,8 +250,9 @@
   Δ-constructor-indices : Δ_0 c_0 -> Θ
   #:pre (Δ-in-constructor-dom Δ_0 c_0)
   [(Δ-constructor-indices Δ c)
-   Θ
+   (Θ-drop Θ n)
    (where D (Δ-key-by-constructor Δ c))
+   (where n (Δ-ref-parameter-count Δ D))
    (where (in-hole Ξ (in-hole Θ D))
      (Δ-ref-constructor-type Δ c))])
 
@@ -249,7 +301,7 @@
   [(Δ-constructor-method-type Δ c_i t_P)
    (in-hole Ξ_a (in-hole Ξ_h ((in-hole Θ_p t_P) (Ξ-apply Ξ_a c_i))))
    (where Θ_p (Δ-constructor-indices Δ c_i))
-   (where Ξ_a (Δ-constructor-telescope Δ c_i))
+   (where Ξ_a (Δ-constructor-ref-index-Ξ Δ c_i))
    (where Ξ_h (Δ-constructor-inductive-hypotheses Δ c_i t_P))])
 
 ;; Return the types of the methods required to eliminate D with motive e
